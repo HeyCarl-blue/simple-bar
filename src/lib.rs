@@ -19,6 +19,8 @@
 //! 
 //! ![above code generates](https://mie-res.netlify.app/simple_bar_example.png)
 
+use std::io::{stdout, Write};
+
 pub struct ProgressBar {
     length: usize,
     state: usize,
@@ -27,7 +29,7 @@ pub struct ProgressBar {
 }
 
 impl ProgressBar {
-    ///Creates a new ProgressBar given:
+    /// Creates a new ProgressBar given:
     /// 1. `num_iterations: usize` the number of iterations
     /// 2. `progress_char: char` the `char` to be printed on the completed spots of the progress bar
     /// 3. `empty_char: char` the `char` to be printed on the empty spots of the progress bar
@@ -68,5 +70,7 @@ impl ProgressBar {
             eprint!(" ");
         }
         eprint!("] ({}%)", perc);
+
+        stdout().flush().unwrap();
     }
 }
