@@ -14,6 +14,10 @@
 //!     sleep(Duration::from_millis(200));
 //! }
 //! ```
+//! 
+//! This example generates the following output:
+//! 
+//! ![above code generates](https://mie-res.netlify.app/simple_bar_example.png)
 
 pub struct ProgressBar {
     length: usize,
@@ -34,7 +38,7 @@ impl ProgressBar {
     /// Creates a new ProgressBar with the default `char`s for the completed and empty spots of the
     /// progress bar, which are: `'▅'` and `' '` respectively.
     pub fn default(length: usize) -> ProgressBar {
-        ProgressBar { length, state: 0, progress_char: '▅', empty_char: ' ' }
+        ProgressBar { length, state: 0, progress_char: '█', empty_char: ' ' }
     }
 
     /// Changes the `char`s for the completed and empty spots of the progress bar.
@@ -43,7 +47,7 @@ impl ProgressBar {
         self.empty_char = empty_char;
     }
 
-    /// Method to be called to update the progress bar
+    /// Updates the progress bar
     pub fn next(&mut self) {
         self.state += 1;
 
