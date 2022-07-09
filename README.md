@@ -4,7 +4,7 @@ An extremely minimal terminal progress bar for Rust.
 
 ## Example
 
-```
+```Rust
 use std::{thread::sleep, time::Duration};
 use simple_bar::ProgressBar;
 
