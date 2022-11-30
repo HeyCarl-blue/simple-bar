@@ -7,11 +7,11 @@
 //! use simple_bar::ProgressBar;
 //! 
 //! let num_iterations = 500;
-//! let mut bar = ProgressBar::default(num_iterations, 50);
+//! let mut bar = ProgressBar::default(num_iterations, 50, false);
 //! 
 //! for _ in 0..num_iterations {
-//!     bar.next();
-//!     sleep(Duration::from_millis(200));
+//!     bar.update();
+//!     sleep(Duration::from_millis(1));
 //! }
 //! ```
 //! 
@@ -19,22 +19,66 @@
 //! 
 //! ![above code generates](https://mie-res.netlify.app/simple_bar_example.png)
 
-use std::time;
+use std::time::{Instant, Duration};
 use std::io::{stdout, Write};
 
+#[derive(Clone, Copy)]
+struct Eta {
+    last_time: Instant,
+    last_step: u32,
+    total: u32,
+    eta: Duration,
+}
+
+impl Eta {
+    pub fn new(total: u32) -> Eta {
+        Eta { 
+            last_time: Instant::now(),
+            last_step: 0,
+            total,
+            eta: Duration::MAX,
+        }
+    }
+
+    fn should_update(&self) -> bool {
+        Instant::now() - self.last_time >= Duration::from_secs(1)
+    }
+
+    fn update(&mut self, step: u32) {
+        let elapsed_time = Instant::now() - self.last_time;
+        self.last_time = Instant::now();
+        let steps_taken = step - self.last_step;
+        self.last_step = step;
+
+        let speed = steps_taken as f32 / elapsed_time.as_millis() as f32;
+
+        match speed > 0.0 {
+            true => {
+                let to_go = (self.total - step) as f32 / speed;
+                self.eta = Duration::from_millis(to_go as u64);
+            }
+            false => { }
+        };
+    }
+
+    pub fn get_eta(&mut self, step: u32) -> Duration {
+        if self.should_update() {
+            self.update(step)
+        }
+        self.eta
+    }
+}
+
 pub struct ProgressBar {
+    delimiters: (char, char),
     num_iterations: u32,
     length: u32,
     state: u32,
     progress_char: char,
     last_progress_char: char,
     empty_char: char,
-    eta: bool,
-    last_percs: Cyclic<u32>,
-    last_times: Cyclic<time::SystemTime>,
+    eta: Option<Eta>,
 }
-
-const LAST_PERC: usize = 10;
 
 impl ProgressBar {
     /// Creates a new ProgressBar given:
@@ -42,36 +86,37 @@ impl ProgressBar {
     /// 2. `progress_char: char` the `char` to be printed on the completed spots of the progress bar
     /// 3. `last_progress_char: char` the `char` to be printed as the last of the progess ones (e.g '>' to make '==>')
     /// 4. `empty_char: char` the `char` to be printed on the empty spots of the progress bar
-    pub fn new(num_iterations: u32, length: u32, progress_char: char, last_progress_char: char, empty_char: char, eta: bool) -> ProgressBar {
-        let last_percs = Cyclic::new(LAST_PERC);
-        let last_times = Cyclic::new(LAST_PERC);
-        ProgressBar { num_iterations, length, state: 0, progress_char, last_progress_char, empty_char, eta, last_percs, last_times }
+    pub fn new(
+        delimiters: (char, char),
+        num_iterations: u32,
+        length: u32,
+        progress_char: char,
+        last_progress_char: char,
+        empty_char: char,
+        eta: bool
+    ) -> ProgressBar 
+    {
+        let mut b_eta = None;
+        if eta {
+            b_eta = Some(Eta::new(num_iterations));
+        }
+        ProgressBar { delimiters, num_iterations, length, state: 0, progress_char, last_progress_char, empty_char, eta: b_eta }
     }
 
     /// Creates a new ProgressBar with the default `char`s for the completed and empty spots of the
     /// progress bar, which are: `'█'` and `' '` respectively.
-    pub fn default(num_iterations: u32, length: u32) -> ProgressBar {
-        ProgressBar::new(num_iterations, length, '█', '█', ' ', false)
-    }
-
-    /// Creates a new ProgressBar with the default `char`s for the completed and empty spots of the
-    /// progress bar, which are: `'█'` and `' '` respectively, with E.T.A.
-    pub fn default_eta(num_iterations: u32, length: u32) -> ProgressBar {
-        ProgressBar::new(num_iterations, length, '█', '█', ' ', true)
+    pub fn default(num_iterations: u32, length: u32, eta: bool) -> ProgressBar {
+        ProgressBar::new(('[', ']'), num_iterations, length, '█', '█', ' ', eta)
     }
 
     ///Creates a new ProgressBar using the cargo style (e.g. [===>  ])
-    pub fn cargo_style(num_iterations: u32, length: u32) -> ProgressBar {
-        ProgressBar::new(num_iterations, length, '=', '>', ' ', false)
-    }
-
-    ///Creates a new ProgressBar using the cargo style (e.g. [===>  ]) with E.T.A.
-    pub fn cargo_style_eta(num_iterations: u32, length: u32) -> ProgressBar {
-        ProgressBar::new(num_iterations, length, '=', '>', ' ', true)
+    pub fn cargo_style(num_iterations: u32, length: u32, eta: bool) -> ProgressBar {
+        ProgressBar::new( ('[', ']'), num_iterations, length, '=', '>', ' ', eta)
     }
 
     /// Changes the `char`s for the completed, last progress, and empty spots of the progress bar.
-    pub fn reformat(&mut self, progress_char: char, last_progress_char: char, empty_char: char) {
+    pub fn reformat(&mut self, delimiters: (char, char), progress_char: char, last_progress_char: char, empty_char: char) {
+        self.delimiters = delimiters;
         self.progress_char = progress_char;
         self.last_progress_char = last_progress_char;
         self.empty_char = empty_char;
@@ -81,7 +126,7 @@ impl ProgressBar {
         self.state = 0;
     }
 
-    fn print_bar(&mut self, perc: u32, eta: f64){
+    fn print_bar(&mut self, perc: u32){
         let length_dig = (self.num_iterations as f64).log10() as i32;
         let state_dig = (self.state as f64).log10() as i32;
         let ratio = remap(self.state as f32, 0., self.num_iterations as f32, 1., self.length as f32);
@@ -93,7 +138,7 @@ impl ProgressBar {
         for _ in 0..(length_dig - state_dig) {
             terminal_string = format!("{}{}", terminal_string, 0);
         }
-        terminal_string = format!("{}{} / {} [", terminal_string, self.state, self.num_iterations);
+        terminal_string = format!("{}{} / {} {}", terminal_string, self.state, self.num_iterations, self.delimiters.0);
         for _ in 0..ratio-1 {
             terminal_string = format!("{}{}", terminal_string, self.progress_char);
         }
@@ -105,35 +150,31 @@ impl ProgressBar {
         for _ in ratio..self.length {
             terminal_string = format!("{}{}", terminal_string, self.empty_char);
         }
-        terminal_string = format!("{}] ({}%)", terminal_string, perc);
+        terminal_string = format!("{}{} ({}%)", terminal_string, self.delimiters.1, perc);
 
-        if self.eta {
-            let eta_hours = eta as i32 / 60 / 60;
-            let eta_minutes = ( eta as i32 / 60 ) % 60 ;
-            let eta_secs = eta as i32 % 60;
+        match self.eta {
+            None => (),
+            Some(mut e) => {
+                let sec_total = e.get_eta(self.state).as_secs();
+                let hours = sec_total / 3600;
+                let mins = ( sec_total / 60 ) % 60;
+                let secs = sec_total % 60;
+                if hours > 99 {
+                    terminal_string = format!("{} ETA ??:??:??", terminal_string);
+                } else {
+                    let hours_digits = (hours/10, hours%10);
+                    let mins_digits = (mins/10, mins%10);
+                    let sec_digits = (secs/10, secs%10);
 
-            let eta_h_dig = i32::max(0, f64::log10(eta_hours as f64) as i32);
-            let eta_m_dig = i32::max(0, f64::log10(eta_minutes as f64) as i32);
-            let eta_s_dig = i32::max(0, f64::log10(eta_secs as f64) as i32);
-
-            if eta_h_dig > 2 {
-                terminal_string = format!("{} ETA: ∞∞:∞∞:∞∞", terminal_string);
-            } else {
-
-                terminal_string = format!("{} ETA: ", terminal_string,);
-
-                for _ in 0..1-eta_h_dig {
-                    terminal_string = format!("{}0", terminal_string);
+                    terminal_string = format!("{} ETA {}{}:{}{}:{}{}",
+                        terminal_string,
+                        hours_digits.0,
+                        hours_digits.1,
+                        mins_digits.0,
+                        mins_digits.1,
+                        sec_digits.0,
+                        sec_digits.1);
                 }
-                terminal_string = format!("{}{}:", terminal_string, eta_hours);
-                for _ in 0..1-eta_m_dig {
-                    terminal_string = format!("{}0", terminal_string);
-                }
-                terminal_string = format!("{}{}:", terminal_string, eta_minutes);
-                for _ in 0..1-eta_s_dig {
-                    terminal_string = format!("{}0", terminal_string);
-                }
-                terminal_string = format!("{}{}", terminal_string, eta_secs);
             }
         }
         
@@ -147,90 +188,16 @@ impl ProgressBar {
     }
 
     /// Updates the progress bar
-    pub fn next(&mut self) {
+    pub fn update(&mut self) {
         assert!(self.state < self.num_iterations);
         self.state += 1;
         let perc = ((self.state as f32 / self.num_iterations as f32) * 100.) as u32;
-
-        if self.eta {
-            self.last_percs.add(perc);
-            self.last_times.add(time::SystemTime::now());
-            let last_length = self.last_percs.length();
-            let y = if last_length >= 2 {
-                let mut vm = 0.;
-                for i in 0..last_length-1 {
-                    let mut it_progress = ( self.last_percs.get(i+1) - self.last_percs.get(i) ) as f64;
-                    let time_progress = self.last_times.get(i+1).duration_since(*self.last_times.get(i)).unwrap();
-                    
-                    let mut secs_progress = time_progress.as_secs_f64();
-
-                    if secs_progress == 0. {
-                        secs_progress = 0.01;
-                    }
-
-                    if it_progress == 0. {
-                        it_progress = 0.01;
-                    }
-
-                    vm += it_progress / secs_progress;
-                }
-                vm *= 1. / last_length as f64;
-
-                if vm == 0. {
-                    vm = 0.1;
-                } 
-                
-                ( 100. - *self.last_percs.last() as f64 ) / vm
-
-            } else {
-                f64::INFINITY
-            };
-
-            self.print_bar(perc, y);
-
-        } else {
-            self.print_bar(perc, 0.);
-        }        
+        self.print_bar(perc);
     }
 
     fn is_last(&self) -> bool {
         self.state == self.num_iterations
     }
-}
-
-struct Cyclic<T: std::clone::Clone> {
-    items: Vec<T>,
-    size: usize,
-}
-
-impl <T: std::clone::Clone> Cyclic<T> {
-    pub fn new(size: usize) -> Cyclic<T> {
-        let items = Vec::<T>::with_capacity(size);
-        Cyclic { items, size }
-    }
-
-    pub fn add(&mut self, item: T) {
-        let items_length = self.length();
-        if items_length >= self.size {
-            self.items.remove(0);
-            self.items.push(item);
-        } else {
-            self.items.push(item);
-        }
-    }
-
-    pub fn length(&self) -> usize {
-        self.items.len()
-    }
-
-    pub fn get(&self, i: usize) -> &T {
-        &self.items[i]
-    }
-
-    pub fn last(&mut self) -> &T {
-        &self.items[self.length()-1]
-    }
-
 }
 
 fn remap(val: f32, min: f32, max: f32, new_min: f32, new_max: f32) -> u32 {
