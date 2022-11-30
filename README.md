@@ -9,10 +9,12 @@ use std::{thread::sleep, time::Duration};
 use simple_bar::ProgressBar;
 
 let num_iterations = 500;
-let mut bar = ProgressBar::default(num_iterations);
+let length = 100;
+let eta = false
+let mut bar = ProgressBar::default(num_iterations, length, eta);
 
 for _ in 0..num_iterations {
-    bar.next();
+    bar.update();
     sleep(Duration::from_millis(200));
 }
 ```
