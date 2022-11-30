@@ -1,5 +1,5 @@
 # Simple Bar
-![https://user-images.githubusercontent.com/1149913/62262785-f920bb80-b3e7-11e9-9003-cc21146c4278.png](https://crates.io/crates/simple_bar)
+![https://crates.io/assets/Cargo-Logo-Small.png](https://crates.io/crates/simple_bar)
 
 An extremely minimal terminal progress bar for Rust.
 
