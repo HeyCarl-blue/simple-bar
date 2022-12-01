@@ -22,12 +22,14 @@
 use std::time::{Instant, Duration};
 use std::io::{stdout, Write};
 
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy)]
 struct Eta {
     last_time: Instant,
     last_step: u32,
     total: u32,
     eta: Duration,
+    latest_speeds: [f32; 10],
+    curr_idx: usize,
 }
 
 impl Eta {
@@ -37,6 +39,8 @@ impl Eta {
             last_step: 0,
             total,
             eta: Duration::MAX,
+            latest_speeds: [f32::MIN; 10],
+            curr_idx: 0,
         }
     }
 
@@ -50,14 +54,24 @@ impl Eta {
         let steps_taken = step - self.last_step;
         self.last_step = step;
 
-        let speed = steps_taken as f32 / elapsed_time.as_millis() as f32;
+        self.latest_speeds[self.curr_idx] = steps_taken as f32 / elapsed_time.as_millis() as f32;
+        self.curr_idx += 1;
+        self.curr_idx %= 10;
+
+        let mut speed = 0.0;
+
+        for val in self.latest_speeds {
+            speed += val;
+        }
+
+        speed /= 10.0;
 
         match speed > 0.0 {
             true => {
                 let to_go = (self.total - step) as f32 / speed;
                 self.eta = Duration::from_millis(to_go as u64);
             }
-            false => { }
+            false => {  }
         };
     }
 
@@ -156,6 +170,7 @@ impl ProgressBar {
             None => (),
             Some(mut e) => {
                 let sec_total = e.get_eta(self.state).as_secs();
+                self.eta = Some(e);
                 let hours = sec_total / 3600;
                 let mins = ( sec_total / 60 ) % 60;
                 let secs = sec_total % 60;
