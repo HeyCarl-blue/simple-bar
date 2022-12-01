@@ -30,6 +30,8 @@ struct Eta {
     eta: Duration,
     latest_speeds: [f32; 10],
     curr_idx: usize,
+    done_once: bool,
+    it_s: f32,
 }
 
 impl Eta {
@@ -41,38 +43,70 @@ impl Eta {
             eta: Duration::MAX,
             latest_speeds: [f32::MIN; 10],
             curr_idx: 0,
+            done_once: false,
+            it_s: 0.0,
         }
     }
 
     fn should_update(&self) -> bool {
-        Instant::now() - self.last_time >= Duration::from_secs(1)
+        !self.done_once || Instant::now() - self.last_time >= Duration::from_secs(1)
     }
 
     fn update(&mut self, step: u32) {
-        let elapsed_time = Instant::now() - self.last_time;
+        self.update_latest_speeds(step);
+        self.update_last_step(step);
+        self.update_last_time();
+        self.update_it_s();
+
+        let speed = self.get_mean_speed();
+
+        if speed > 0.0 {
+            let to_go = (self.total - step) as f32 / speed;
+            self.eta = Duration::from_millis(to_go as u64);
+        }
+    }
+
+    fn get_steps_taken(&self, step: u32) -> u32 {
+        step - self.last_step
+    }
+
+    fn get_elapsed_time(&self) -> Duration {
+        Instant::now() - self.last_time
+    }
+
+    fn update_last_time(&mut self) {
         self.last_time = Instant::now();
-        let steps_taken = step - self.last_step;
+    }
+
+    fn update_last_step(&mut self, step: u32) {
         self.last_step = step;
+    }
+
+    fn update_latest_speeds(&mut self, step: u32) {
+        let steps_taken = self.get_steps_taken(step);
+        let elapsed_time = self.get_elapsed_time();
 
         self.latest_speeds[self.curr_idx] = steps_taken as f32 / elapsed_time.as_millis() as f32;
         self.curr_idx += 1;
         self.curr_idx %= 10;
 
+        if !self.done_once && self.curr_idx == 0 {
+            self.done_once = true;
+        }
+    }
+
+    fn update_it_s(&mut self) {
+        self.it_s = self.get_mean_speed();
+    }
+
+    fn get_mean_speed(&self) -> f32 {
         let mut speed = 0.0;
 
         for val in self.latest_speeds {
             speed += val;
         }
 
-        speed /= 10.0;
-
-        match speed > 0.0 {
-            true => {
-                let to_go = (self.total - step) as f32 / speed;
-                self.eta = Duration::from_millis(to_go as u64);
-            }
-            false => {  }
-        };
+        speed / 10.0
     }
 
     pub fn get_eta(&mut self, step: u32) -> Duration {
@@ -138,6 +172,10 @@ impl ProgressBar {
 
     pub fn reset(&mut self) {
         self.state = 0;
+        match self.eta {
+            Some(_) => { self.eta = Some(Eta::new(self.num_iterations)); }
+            None => { }
+        };
     }
 
     fn print_bar(&mut self, perc: u32){
@@ -190,6 +228,7 @@ impl ProgressBar {
                         sec_digits.0,
                         sec_digits.1);
                 }
+                terminal_string = format!("{} it/s {:.2}", terminal_string, e.it_s);
             }
         }
         
