@@ -1,5 +1,5 @@
 # Simple Bar
-crates.io/crates/simple_bar
+[crates.io/crates/simple_bar]
 
 An extremely minimal terminal progress bar for Rust.
 
